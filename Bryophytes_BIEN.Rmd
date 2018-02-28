@@ -1,0 +1,459 @@
+---
+title: "Bryophytes BIEN"
+output: html_notebook
+---
+
+```{r}
+library(BIEN)
+library(ape)
+library(maps) 
+library(sp) 
+require(dplyr)
+require(maptools)
+require(raster)
+require(dismo)
+require(sp)
+require(rgdal)
+require(mapdata)
+require(mapproj)
+```
+
+
+#Creates command: BIEN_occurrence_higher_plant_group
+```{r}
+BIEN_occurrence_higher_plant_group <- function (higher_plant_group, cultivated = FALSE, only.new.world = TRUE, 
+                                                print.query = FALSE, observation.type = FALSE, all.taxonomy = FALSE, 
+                                                native.status = FALSE, political.boundaries = FALSE, ...) 
+{
+  is_char(higher_plant_group)
+  is_log(cultivated)
+  is_log(only.new.world)
+  is_log(print.query)
+  is_log(observation.type)
+  is_log(all.taxonomy)
+  is_log(native.status)
+  is_log(political.boundaries)
+  if (!cultivated) {
+    cultivated_query <- "AND (is_cultivated = 0 OR is_cultivated IS NULL)"
+    cultivated_select <- ""
+  }
+  else {
+    cultivated_query <- ""
+    cultivated_select <- ",is_cultivated,is_cultivated_in_region"
+  }
+  if (only.new.world) {
+    newworld_query <- "AND is_new_world = 1 "
+    newworld_select <- ""
+  }
+  else {
+    newworld_query <- ""
+    newworld_select <- ",is_new_world"
+  }
+  if (!all.taxonomy) {
+    taxon_select <- ""
+  }
+  else {
+    taxon_select <- "verbatim_family,verbatim_scientific_name,family_matched,name_matched,name_matched_author,higher_plant_group,taxonomic_status,scrubbed_author,"
+  }
+  if (!native.status) {
+    native_select <- ""
+  }
+  else {
+    native_select <- "native_status,native_status_reason,native_status_sources,isintroduced,native_status_country,native_status_state_province,native_status_county_parish,"
+  }
+  if (!observation.type) {
+    observation_select <- ""
+  }
+  else {
+    observation_select <- ",observation_type"
+  }
+  if (!political.boundaries) {
+    political_select <- ""
+  }
+  else {
+    political_select <- "country,state_province,county,locality,"
+  }
+  query <- paste("SELECT higher_plant_group,", taxon_select, native_select, 
+                 political_select, "scrubbed_species_binomial, latitude, longitude,date_collected,datasource,dataset,dataowner,custodial_institution_codes,collection_code", 
+                 paste(cultivated_select, newworld_select, observation_select), 
+                 "\n                 FROM view_full_occurrence_individual \n                 WHERE higher_plant_group in (", 
+                 paste(shQuote(higher_plant_group, type = "sh"), collapse = ", "), 
+                 ")", paste(cultivated_query, newworld_query), " AND higher_plant_group IS NOT NULL AND (is_geovalid = 1 OR is_geovalid IS NULL) ORDER BY scrubbed_species_binomial;")
+  if (print.query) {
+    query <- gsub(pattern = "\n", replacement = "", query)
+    query <- gsub("(?<=[\\s])\\s*|^\\s+|\\s+$", "", query, 
+                  perl = TRUE)
+    print(query)
+  }
+  return(BIEN_sql(query, ...))
+}
+```
+
+
+#Runs Command and stores as Data Set
+```{r}
+bryophyte_occurrence <- BIEN_occurrence_higher_plant_group("bryophytes")
+```
+
+
+#Creates Command BIEN_taxonomy_higher_plant_group to access species names of bryophytes in BIEN
+```{r}
+BIEN_taxonomy_higher_plant_group <- function (higher_plant_group, print.query = FALSE, ...) 
+{
+  is_char(higher_plant_group)
+  is_log(print.query)
+  sql_select <- paste("SELECT DISTINCT higher_plant_group, \"class\", superorder, \"order\", scrubbed_family,scrubbed_genus,scrubbed_species_binomial,scrubbed_author,scrubbed_taxonomic_status")
+  sql_from <- paste(" FROM bien_taxonomy")
+  sql_where <- paste(" WHERE higher_plant_group in (", paste(shQuote(higher_plant_group, 
+                                                                     type = "sh"), collapse = ", "), ") AND scrubbed_species_binomial IS NOT NULL")
+  sql_order_by <- paste(" ORDER BY higher_plant_group,scrubbed_family,scrubbed_genus,scrubbed_species_binomial,scrubbed_author ")
+  query <- paste(sql_select, sql_from, sql_where, sql_order_by, 
+                 ";")
+  if (print.query) {
+    query <- gsub(pattern = "\n", replacement = "", query)
+    query <- gsub("(?<=[\\s])\\s*|^\\s+|\\s+$", "", query, 
+                  perl = TRUE)
+    print(query)
+  }
+  return(BIEN_sql(query, ...))
+}
+```
+
+
+#Creates Bryophyte Database
+```{r}
+bryophytes <- BIEN_taxonomy_higher_plant_group("bryophytes", print.query = FALSE)
+```
+
+
+#Importing SpeciesPresence
+```{r}
+SpeciesPresence <- read.csv("~/Downloads/SpeciesPresence_by_100km_Cell.csv")
+```
+
+
+#Replacing "_" with " " in SpeciesPrescence
+```{r}
+SpeciesPresence$Species <- gsub("_", " ", SpeciesPresence$Species)
+```
+
+
+#Filter Dataset
+```{r}
+FilteredOccurrence=SpeciesPresence[SpeciesPresence$Species %in% unique(bryophyte_occurrence$scrubbed_species_binomial), ]
+View(FilteredOccurrence)
+```
+
+#Tally
+```{r}
+tally <- tally(group_by(FilteredOccurrence, CellID))
+colnames(tally)[2] <- "Richness"
+```
+
+#Import Raster
+```{r}
+BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+```
+
+
+#Create Data with all Columns
+```{r}
+Moss_Richness <- numeric(15038)
+Moss_Richness[tally$CellID] <- tally$Richness
+```
+
+
+#Plot Data
+```{r}
+RichnessRaster <- setValues(BIENblank, Moss_Richness)
+plot(RichnessRaster, axes = F)
+```
+
+
+#Take off gray
+```{r}
+RichnessVector<-Moss_Richness
+RichnessVector[which(RichnessVector==0)]=NA
+RichnessRasterNA <- setValues(BIENblank, RichnessVector)
+plot(RichnessRasterNA, axes = F)
+```
+
+
+#Import Phylogeny
+```{r}
+bryphy <- read.csv("~/Documents/Courses/Research/BIEN/Bryophyte Phylogeny.csv")
+```
+
+
+#Mosses <- subset(bryphy, Group=="Mosses")
+#Liverworts <- subset(bryphy, Group=="Liverworts")
+#Hornworts <- subset(bryphy, Group=="Hornworts")
+
+Rename Columns
+```{r}
+bryophytes$Family <- bryophytes$scrubbed_family
+bryophytes$Genus <- bryophytes$scrubbed_genus
+bryophytes$Species <- bryophytes$scrubbed_species_binomial
+```
+
+Data Manipulation
+```{r}
+newbryophyte <- bryophytes[,c(10,11,12)]
+#data1<- newdata[,c(4,5,6)]
+```
+
+
+#Add Group to Bryophyte data by family
+```{r}
+newbryophyte <- merge(newbryophyte, bryphy, by = "Family", all.x = TRUE)
+```
+
+#Add Group to Occurrence data by species
+```{r}
+FilteredOccurrence <- merge(FilteredOccurrence, newbryophyte, by = "Species", all.x= TRUE)
+```
+
+#Subset Occurrence data by group
+```{r}
+mossoccurrence <- subset(FilteredOccurrence, FilteredOccurrence$Group=="Mosses")
+hornwortoccurrence <- subset(FilteredOccurrence, FilteredOccurrence$Group=="Hornworts")
+liverwortoccurrence <- subset(FilteredOccurrence, FilteredOccurrence$Group=="Liverworts")
+hornandliveroccurrence <- subset(FilteredOccurrence, FilteredOccurrence$Group=="Hornworts"|FilteredOccurrence$Group=="Liverworts")
+```
+
+
+#Mapping Mosses
+#Tally
+```{r}
+require(dplyr)
+MossTally <- tally(group_by(mossoccurrence, CellID))
+colnames(MossTally)[2] <- "Richness"
+```
+
+
+#Import Raster
+#BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+
+#Create Data with all Columns
+```{r}
+Mosses_Richness <- numeric(15038)
+Mosses_Richness[MossTally$CellID] <- MossTally$Richness
+```
+
+
+#Plot Data
+```{r}
+MossRichnessRaster <- setValues(BIENblank, Mosses_Richness)
+plot(MossRichnessRaster)
+MossRichnessVector<-Mosses_Richness
+MossRichnessVector[which(MossRichnessVector==0)]=NA
+MossRichnessRasterNA <- setValues(BIENblank, MossRichnessVector)
+plot(MossRichnessRasterNA, axes = F)
+```
+
+
+
+#Trial of Mapping Hornworts
+
+#Tally
+```{r}
+require(dplyr)
+HornwortTally <- tally(group_by(hornwortoccurrence, CellID))
+colnames(HornwortTally)[2] <- "Richness"
+```
+
+#Import Raster
+#BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+
+#Create Data with all Columns
+```{r}
+Hornwort_Richness <- numeric(15038)
+Hornwort_Richness[HornwortTally$CellID] <- HornwortTally$Richness
+```
+
+
+#Plot Data
+```{r}
+HornwortRichnessRaster <- setValues(BIENblank, Hornwort_Richness)
+plot(HornwortRichnessRaster)
+HornwortRichnessVector<-Hornwort_Richness
+HornwortRichnessVector[which(HornwortRichnessVector==0)]=NA
+HornwortRichnessRasterNA <- setValues(BIENblank, HornwortRichnessVector)
+plot(HornwortRichnessRasterNA, axes = F)
+```
+
+
+#Mapping Liverworts
+#Tally
+```{r}
+require(dplyr)
+LiverwortTally <- tally(group_by(liverwortoccurrence, CellID))
+colnames(LiverwortTally)[2] <- "Richness"
+```
+
+
+#Import Raster
+#BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+
+#Create Data with all Columns
+```{r}
+Liverwort_Richness <- numeric(15038)
+Liverwort_Richness[LiverwortTally$CellID] <- LiverwortTally$Richness
+```
+
+
+#Plot Data
+```{r}
+LiverwortRichnessRaster <- setValues(BIENblank, Liverwort_Richness)
+plot(LiverwortRichnessRaster)
+LiverwortRichnessVector<-Liverwort_Richness
+LiverwortRichnessVector[which(LiverwortRichnessVector==0)]=NA
+LiverwortRichnessRasterNA <- setValues(BIENblank, LiverwortRichnessVector)
+plot(LiverwortRichnessRasterNA, axes = F)
+```
+
+
+
+#Trial of Mapping Hornworts and Liverworts
+
+#Tally
+```{r}
+require(dplyr)
+HornandLiverTally <- tally(group_by(hornandliveroccurrence, CellID))
+colnames(HornandLiverTally)[2] <- "Richness"
+```
+
+#Import Raster
+#BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+
+#Create Data with all Columns
+```{r}
+HornandLiver_Richness <- numeric(15038)
+HornandLiver_Richness[HornandLiverTally$CellID] <- HornandLiverTally$Richness
+```
+
+
+#Plot Data
+```{r}
+HornandLiverRichnessRaster <- setValues(BIENblank, HornandLiver_Richness)
+plot(HornandLiverRichnessRaster)
+HornandLiverRichnessVector<-HornandLiver_Richness
+HornandLiverRichnessVector[which(HornandLiverRichnessVector==0)]=NA
+HornandLiverRichnessRasterNA <- setValues(BIENblank, HornandLiverRichnessVector)
+plot(HornandLiverRichnessRasterNA, axes = F)
+ ```
+
+#FUNCTIONS
+#Group
+```{r}
+group.map <- function(x, ...){
+  k <- subset(FilteredOccurrence, FilteredOccurrence$Group== x)
+  b <- tally(group_by(k, CellID))
+  colnames(b)[2] <- "Richness"
+  BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+  f <- numeric(15038)
+  f[b$CellID] <- b$Richness
+  c <- setValues(BIENblank, f)
+  plot(c)
+  g<-f
+  g[which(g==0)]=NA
+  h <- setValues(BIENblank, g)
+  plot(h, axes = F)
+}
+```
+
+Try it out:
+```{r}
+group.map("Mosses")
+group.map("Hornworts")
+group.map("Liverworts")
+```
+
+
+#Species
+```{r}
+species.map <- function(x, ...){
+  k <- subset(FilteredOccurrence, FilteredOccurrence$Species== x)
+  b <- tally(group_by(k, CellID))
+  colnames(b)[2] <- "Richness"
+  BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+  f <- numeric(15038)
+  f[b$CellID] <- b$Richness
+  c <- setValues(BIENblank, f)
+  plot(c)
+  g<-f
+  g[which(g==0)]=NA
+  h <- setValues(BIENblank, g)
+  plot(h)
+}
+```
+
+Try it out:
+```{r}
+species.map("Anacolia laevisphaera")
+species.map("Splachnum sphaericum")
+species.map("Physcomitrella patens")
+```
+
+
+
+
+#Family Function
+```{r}
+family.map <- function(x, ...){
+  k <- subset(FilteredOccurrence, FilteredOccurrence$Family== x)
+  b <- tally(group_by(k, CellID))
+  colnames(b)[2] <- "Richness"
+  BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+  f <- numeric(15038)
+  f[b$CellID] <- b$Richness
+  c <- setValues(BIENblank, f)
+  plot(c)
+  g<-f
+  g[which(g==0)]=NA
+  h <- setValues(BIENblank, g)
+  plot(h)
+}
+```
+
+Try it out:
+```{r}
+family.map("Sphagnaceae")
+family.map("Anthocerotaceae")
+```
+
+
+#Create Dataset showing Range
+```{r}
+Range <- tally(group_by(FilteredOccurrence, Species))
+Filter <- merge(Range, FilteredOccurrence, by = "Species")
+```
+
+
+#Find Median of CellIDs
+```{r}
+filter.2 <- subset(Filter, select = c("n", "CellID")) %>%
+     group_by(CellID) %>%
+     summarize(Avg = median(n))
+```
+
+
+#Create Range Map
+```{r}
+BIENblank <-raster("~/Downloads/blank_100km_raster.tif")
+Moss_Range.3 <- numeric(15038)
+Moss_Range.3[filter.2$CellID] <- filter.2$Avg
+RangeRaster <- setValues(BIENblank, Moss_Range.3)
+plot(RangeRaster)
+```
+
+#Take off gray
+```{r}
+RangeVector<-Moss_Range.3
+RangeVector[which(RangeVector==0)]=NA
+RangeRasterNA <- setValues(BIENblank, RangeVector)
+plot(RangeRasterNA)
+```
+
+
+
