@@ -25,23 +25,36 @@ map('worldHires',xlim=c(min(-170),max(-20)), ylim=c(min(-60),max(100)), fill=FAL
 
 #Project latitude and longitude onto our raster
   #Create new gradient
-colfunc <- colorRampPalette(c("dodgerblue", "darkgoldenrod1", "firebrick1"))
+colfunc <- colorRampPalette(c("dodgerblue", "darkgreen","darkgoldenrod1", "firebrick1"))
 MossRichnessRasterNAll <- projectRaster(MossRichnessRasterNA, crs='+proj=longlat')
 croppedMossRichnessRasterNAll = crop(MossRichnessRasterNAll, model.extent)
 plot(croppedMossRichnessRasterNAll, col = colfunc(200))
 
 #Resample to same grid:
-r.new = resample(modelEnv, croppedMossRichnessRasterNAll, "bilinear")
+WC.new = resample(modelEnv, croppedMossRichnessRasterNAll, "bilinear")
 
 #If required (for masking), set extents to match:
 ex = extent(modelEnv)
-r2 = crop(croppedMossRichnessRasterNAll, ex)
+moss.raster.projection.cropped = crop(MossRichnessRasterNAll, ex)
 
 #Removed data which falls outside one of the rasters (if you need to):
-r.new = mask(r.new, r2)
+WC.new = mask(WC.new, moss.raster.projection.cropped)
+
+colfunc1 <- colorRampPalette(c("dodgerblue", "firebrick1"))
+
+plot(WC.new[["bio1"]]/10, main="Annual Mean Temperature", col =  colfunc1(200))
+
+Moss.LL.data <- as.data.frame(moss.raster.projection.cropped, xy =TRUE)
+names(Moss.LL.data)[names(Moss.LL.data) == 'blank_100km_raster'] <- 'Richness'
 
 
-plot(r.new[["bio1"]]/10, main="Annual Mean Temperature", col =  colfunc(200))
+rename_df <- function(z, y){
+  y <- z
+}
+r.to.df <- function(x, r) {
+  x.df <- as.data.frame(x, xy = TRUE)
+  rename_df(x.df, r)
+  View(r)
+}
 
-
-
+r.to.df(moss.raster.projection.cropped, "newdata")
