@@ -8,8 +8,12 @@ library(dismo)
 library(rJava) 
 library(maptools)
 library(jsonlite)
-require(wesanderson)
 require(grDevices)
+require(ggplot2)
+library(devtools)
+install_github("ggbiplot", "vqv")
+library(ggbiplot)
+library(factoextra)
 # Overlaying A World Clim Raster onto our Raster --------------------------
 
 #Download data from World Clim
@@ -46,15 +50,40 @@ plot(WC.new[["bio1"]]/10, main="Annual Mean Temperature", col =  colfunc1(200))
 
 Moss.LL.data <- as.data.frame(moss.raster.projection.cropped, xy =TRUE)
 names(Moss.LL.data)[names(Moss.LL.data) == 'blank_100km_raster'] <- 'Richness'
+Moss.LL.data.new <- Moss.LL.data[complete.cases(Moss.LL.data),]
+Moss.LL.data.new1 <- Moss.LL.data.new[,1:2]
 
 
-rename_df <- function(z, y){
-  y <- z
-}
-r.to.df <- function(x, r) {
-  x.df <- as.data.frame(x, xy = TRUE)
-  rename_df(x.df, r)
-  View(r)
-}
+data <- data.frame(coordinates(Moss.LL.data.new1),
+                   extract(WC.new, Moss.LL.data.new1))
+finaldataset <- merge(data, Moss.LL.data.new, by=c("x","y")) 
 
-r.to.df(moss.raster.projection.cropped, "newdata")
+#Take NA's out
+finalslimdataset<- finaldataset[complete.cases(finaldataset),]
+
+#create a dataset with only bioclim variables and no NAs
+nonadata <- data[complete.cases(data),]
+pcadata <- nonadata[,3:21]
+
+#Run PCA on this Data
+pca <- prcomp(pcadata, center = TRUE, scale. = TRUE) 
+#Loadings
+head(pca$x)
+pca$rotation
+
+#Visuals
+plot(pca, type = "l")
+
+#Scatterplot
+p <- ggbiplot(pca, obs.scale = 1, var.scale = 1, ellipse = TRUE, circle = TRUE)+
+  geom_point(size = 0.01)
+print(p)
+
+#Circle Plot
+fviz_pca_var(pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+
+#Plot of Variance for Each Variable
+fviz_eig(pca)
